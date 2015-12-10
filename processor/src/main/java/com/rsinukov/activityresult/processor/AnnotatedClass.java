@@ -3,6 +3,8 @@ package com.rsinukov.activityresult.processor;
 import com.rsinukov.activityresult.annotations.ActivityResult;
 import com.rsinukov.activityresult.annotations.ActivityResults;
 
+import javax.lang.model.element.Element;
+import javax.lang.model.element.Name;
 import javax.lang.model.element.TypeElement;
 import java.util.*;
 
@@ -11,20 +13,34 @@ import java.util.*;
  */
 public class AnnotatedClass {
 
-    private Set<FieldToGenerate> optionalFields = new HashSet<FieldToGenerate>();
-    private Set<FieldToGenerate> requiredFields = new HashSet<FieldToGenerate>();
+    private final Name name;
+    private final Set<FieldToGenerate> optionalFields = new HashSet<FieldToGenerate>();
+    private final Set<FieldToGenerate> requiredFields = new HashSet<FieldToGenerate>();
+    private final Element element;
+    private final Name className;
 
-    private AnnotatedClass(TypeElement element)
+    public AnnotatedClass(TypeElement element)
             throws IllegalStateException {
+
+        this.name = element.getQualifiedName();
+        this.className = element.getSimpleName();
+        this.element = element;
+
         ActivityResult annotation = element.getAnnotation(ActivityResult.class);
         ActivityResults annotationsArray = element.getAnnotation(ActivityResults.class);
+
+        if (annotation != null && annotationsArray != null) {
+            throw new IllegalArgumentException(
+                    String.format("Only one annotation is allowed. Error inin @%s",
+                           element.getQualifiedName().toString()));
+        }
 
         if (annotation != null) {
             addField(element, annotation);
         }
         if (annotationsArray != null) {
             for (ActivityResult ar : annotationsArray.value()) {
-                addField(element, annotation);
+                addField(element, ar);
             }
         }
     }
@@ -49,4 +65,23 @@ public class AnnotatedClass {
         }
     }
 
+    public Set<FieldToGenerate> getOptionalFields() {
+        return optionalFields;
+    }
+
+    public Set<FieldToGenerate> getRequiredFields() {
+        return requiredFields;
+    }
+
+    public Name getName() {
+        return name;
+    }
+
+    public Element getElement() {
+        return element;
+    }
+
+    public Name getClassName() {
+        return className;
+    }
 }

@@ -3,6 +3,7 @@ package com.rsinukov.activityresult.processor;
 import com.rsinukov.activityresult.CustomParcel;
 import com.rsinukov.activityresult.EmptyParcel;
 import com.rsinukov.activityresult.annotations.ActivityResult;
+import sun.net.ftp.FtpDirEntry;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -14,6 +15,7 @@ import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
+import java.lang.reflect.Type;
 import java.util.List;
 
 /**
@@ -22,7 +24,8 @@ import java.util.List;
 public class FieldToGenerate implements Comparable<FieldToGenerate> {
 
     private final String name;
-    private final String type;
+    private String typeString;
+    private TypeMirror type;
     private final boolean required;
     private final TypeElement element;
     private String bundlerClass;
@@ -30,7 +33,6 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
     public FieldToGenerate(ActivityResult annotation, TypeElement element)
             throws IllegalArgumentException {
         this.name = annotation.name();
-        this.type = annotation.type().toString();
         this.required = annotation.isRequired();
         this.element = element;
 
@@ -47,33 +49,41 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
             TypeMirror baggerClass = mte.getTypeMirror();
             bundlerClass = getFullQualifiedParcelName(baggerClass);
         }
+        try {
+            Class clazz = annotation.type();
+            typeString = getFullQualifiedParcelName(clazz);
+        } catch (MirroredTypeException mte) {
+            TypeMirror baggerClass = mte.getTypeMirror();
+            typeString = getFullQualifiedParcelName(baggerClass);
+            type = mte.getTypeMirror();
+        }
     }
 
     private String getFullQualifiedParcelName(TypeMirror baggerClass)
             throws IllegalArgumentException {
         if (baggerClass == null) {
-            throw new IllegalArgumentException(String.format("Could not get the ArgsBundler class from @%s in @%s", name, element));
+            throw new IllegalArgumentException(String.format("Could not get the CustomParcel class from @%s in @%s", name, element));
         }
 
         if (baggerClass.toString().equals(EmptyParcel.class.getCanonicalName())) {
             return EmptyParcel.class.getCanonicalName();
         }
 
-        if (baggerClass.getKind() != TypeKind.DECLARED) {
-            throw new IllegalArgumentException(String.format("@ %s is not a class in %s ",
-                    CustomParcel.class.getSimpleName(), element.getSimpleName()));
-        }
+//        if (baggerClass.getKind() != TypeKind.DECLARED) {
+//            throw new IllegalArgumentException(String.format("@%s is not a class in @%s ",
+//                    baggerClass.toString(), element.getSimpleName()));
+//        }
 
-        if (!isPublicClass((DeclaredType) baggerClass)) {
-            throw new IllegalArgumentException(String.format(
-                    "The %s must be a public class to be a valid CustomParcel", baggerClass.toString()));
-        }
+//        if (!isPublicClass((DeclaredType) baggerClass)) {
+//            throw new IllegalArgumentException(String.format(
+//                    "The %s must be a public class to be a valid CustomParcel", baggerClass.toString()));
+//        }
 
-        if (!hasPublicEmptyConstructor((DeclaredType) baggerClass)) {
-            throw new IllegalArgumentException(String.format(
-                    "The %s must provide a public empty default constructor to be a valid CustomParcel",
-                    baggerClass.toString()));
-        }
+//        if (!hasPublicEmptyConstructor((DeclaredType) baggerClass)) {
+//            throw new IllegalArgumentException(String.format(
+//                    "The %s must provide a public empty default constructor to be a valid CustomParcel",
+//                    baggerClass.toString()));
+//        }
 
         return baggerClass.toString();
     }
@@ -154,8 +164,8 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
         return name;
     }
 
-    public String getType() {
-        return type;
+    public String getTypeString() {
+        return typeString;
     }
 
     public Element getElement() {
@@ -164,6 +174,10 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
 
     public boolean isRequired() {
         return required;
+    }
+
+    public TypeMirror getType() {
+        return type;
     }
 
     @Override
@@ -183,18 +197,18 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
 
     @Override
     public String toString() {
-        return name + "/" + type;
+        return name + "/" + typeString;
     }
 
     public String getRawType() {
         if (isArray()) {
-            return type.substring(0, type.length() - 2);
+            return typeString.substring(0, typeString.length() - 2);
         }
-        return type;
+        return typeString;
     }
 
     public boolean isArray() {
-        return type.endsWith("[]");
+        return typeString.endsWith("[]");
     }
 
     public boolean isPrimitive() {
