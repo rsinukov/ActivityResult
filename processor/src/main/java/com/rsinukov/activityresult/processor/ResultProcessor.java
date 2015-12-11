@@ -77,6 +77,7 @@ public class ResultProcessor extends AbstractProcessor {
         messager = processingEnv.getMessager();
     }
 
+    //TODO: change to smaller methods
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
         Elements elementUtils = processingEnv.getElementUtils();
@@ -112,7 +113,8 @@ public class ResultProcessor extends AbstractProcessor {
                 List<FieldToGenerate> allFields = new ArrayList<FieldToGenerate>(annotatedClass.getOptionalFields());
                 allFields.addAll(annotatedClass.getRequiredFields());
 
-                //create with(Intent intent) method
+                //create with(Intent intent) method for result class
+                //TODO: add custom parcel functionality
                 TypeMirror intentType = elementUtils.getTypeElement("android.content.Intent").asType();
                 String intentSimpleClassName = "Intent";
                 TypeMirror bundleType = elementUtils.getTypeElement("android.os.Bundle").asType();
@@ -155,7 +157,8 @@ public class ResultProcessor extends AbstractProcessor {
                     fields.add(fieldSpec);
                 }
 
-                //create toIntent method
+                //create toIntent method for result class
+                //TODO: add custom parcel functionality
                 MethodSpec.Builder toIntentMethod = MethodSpec.methodBuilder("toIntent")
                         .returns(TypeName.get(intentType))
                         .addModifiers(Modifier.PUBLIC)
@@ -285,7 +288,6 @@ public class ResultProcessor extends AbstractProcessor {
 
         return null;
     }
-
 
     private TypeMirror getWildcardType(String type, String elementType) {
         TypeElement arrayList = processingEnv.getElementUtils().getTypeElement(type);
