@@ -18,6 +18,7 @@ import javax.xml.stream.events.StartElement;
 
 import java.io.IOException;
 import java.io.Serializable;
+import java.lang.reflect.Type;
 import java.util.*;
 
 /**
@@ -94,18 +95,51 @@ public class ResultProcessor extends AbstractProcessor {
                 annotatedClasses.add(new AnnotatedClass(enclosingElement));
             }
 
-            for (AnnotatedClass ac : annotatedClasses) {
+            for (AnnotatedClass annotatedClass : annotatedClasses) {
+                String annotatedClassName = annotatedClass.getName().toString();
+                String packageName = annotatedClassName.substring(0, annotatedClassName.lastIndexOf("."));
+                String resultClassSimpleName = annotatedClass.getClassName() + "Result";
+                ClassName resultClassName = ClassName.get(packageName, resultClassSimpleName);
 
                 List<MethodSpec> methods = new ArrayList<MethodSpec>();
                 List<FieldSpec> fields = new ArrayList<FieldSpec>();
 
+                //create empty constructor for result class
                 MethodSpec constructor = MethodSpec.constructorBuilder()
                         .addModifiers(Modifier.PRIVATE)
                         .build();
 
-                List<FieldToGenerate> allFields = new ArrayList<FieldToGenerate>(ac.getOptionalFields());
-                allFields.addAll(ac.getRequiredFields());
+                List<FieldToGenerate> allFields = new ArrayList<FieldToGenerate>(annotatedClass.getOptionalFields());
+                allFields.addAll(annotatedClass.getRequiredFields());
 
+                //create with(Intent intent) method
+                TypeMirror intentType = elementUtils.getTypeElement("android.content.Intent").asType();
+                String intentSimpleClassName = "Intent";
+                TypeMirror bundleType = elementUtils.getTypeElement("android.os.Bundle").asType();
+                String bundleSimpleClassName = "Bundle";
+                MethodSpec.Builder withMethod = MethodSpec.methodBuilder("with")
+                        .returns(resultClassName)
+                        .addModifiers(Modifier.PUBLIC)
+                        .addModifiers(Modifier.STATIC)
+                        .addParameter(TypeName.get(intentType), "intent")
+                        .addStatement("$L bundle = intent.getExtras()", bundleType)
+                        .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
+                for (FieldToGenerate field : allFields) {
+                    String operation = getOperation(field);
+                    if (operation == null) {
+                        messager.printMessage(Diagnostic.Kind.ERROR,
+                                String.format("Can not get @%s from bundle in @%s", field.getName(), annotatedClass.getName()));
+                    }
+                    if (operation.equals("Serializable")) {
+                        withMethod.addStatement("result.$L = ($L) bundle.get$L(\"$L\")", field.getName(), field.getRawType(), operation, field.getName());
+                    } else {
+                        withMethod.addStatement("result.$L = bundle.get$L(\"$L\")", field.getName(), operation, field.getName());
+                    }
+                }
+                withMethod.addStatement("return result");
+                methods.add(withMethod.build());
+
+                //create fields and getters for result class
                 for (FieldToGenerate field : allFields) {
                     MethodSpec methodSpec = MethodSpec
                             .methodBuilder("get" + toCamelCase(field.getName()))
@@ -121,29 +155,67 @@ public class ResultProcessor extends AbstractProcessor {
                     fields.add(fieldSpec);
                 }
 
+                //create toIntent method
+                MethodSpec.Builder toIntentMethod = MethodSpec.methodBuilder("toIntent")
+                        .returns(TypeName.get(intentType))
+                        .addModifiers(Modifier.PUBLIC)
+                        .addStatement("$L bundle = new $L()", bundleType, bundleType);
+                for (FieldToGenerate field : allFields) {
+                    String operation = getOperation(field);
+                    if (operation == null) {
+                        messager.printMessage(Diagnostic.Kind.ERROR,
+                                String.format("Can not put @%s to bundle in @%s", field.getName(), annotatedClass.getName()));
+                    }
+                    toIntentMethod.addStatement("bundle.put$L(\"$L\", $L)", operation, field.getName(), field.getName());
+                }
+                toIntentMethod.addStatement("$L intent = new $L()", intentSimpleClassName, intentSimpleClassName);
+                toIntentMethod.addStatement("intent.putExtras(bundle)");
+                toIntentMethod.addStatement("return intent");
+                methods.add(toIntentMethod.build());
+
+                //create builder for result class
                 TypeSpec.Builder resultBuilder = TypeSpec.classBuilder("Builder")
                         .addModifiers(Modifier.PUBLIC, Modifier.STATIC);
 
+                //create constructor with required fields as params for builder
                 MethodSpec.Builder builderConstructor = MethodSpec.constructorBuilder()
                         .addModifiers(Modifier.PUBLIC);
-                for (FieldToGenerate field : ac.getRequiredFields()) {
+                for (FieldToGenerate field : annotatedClass.getRequiredFields()) {
                     builderConstructor.addParameter(TypeName.get(field.getType()), field.getName());
+                    builderConstructor.addStatement("this.$L = $L", field.getName(), field.getName());
                 }
                 resultBuilder.addMethod(builderConstructor.build());
 
+                //create fields for builder
                 for (FieldToGenerate field : allFields) {
                     resultBuilder.addField(TypeName.get(field.getType()), field.getName(), Modifier.PRIVATE);
                 }
 
-                for (FieldToGenerate field : ac.getOptionalFields()) {
+                //create setters for optional fields for builder
+                for (FieldToGenerate field : annotatedClass.getOptionalFields()) {
                     resultBuilder.addMethod(MethodSpec.methodBuilder("set" + toCamelCase(field.getName()))
+                            .returns(ClassName.get(annotatedClass.getName().toString() + "Result", "Builder"))
                             .addModifiers(Modifier.PUBLIC)
                             .addParameter(TypeName.get(field.getType()), field.getName())
                             .addStatement("this.$L = $L", field.getName(), field.getName())
+                            .addStatement("return this")
                             .build());
                 }
 
-                TypeSpec resultClass = TypeSpec.classBuilder(ac.getClassName().toString() + "Result")
+                //create build() method for builder
+                MethodSpec.Builder builderMethodSpec = MethodSpec.methodBuilder("build")
+                        .returns(resultClassName)
+                        .addModifiers(Modifier.PUBLIC)
+                        .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
+                for (FieldToGenerate field : allFields) {
+                    builderMethodSpec.addStatement("result.$L = $L", field.getName(), field.getName());
+                }
+                builderMethodSpec.addStatement("return result");
+
+                resultBuilder.addMethod(builderMethodSpec.build());
+
+                //create result class
+                TypeSpec resultClass = TypeSpec.classBuilder(resultClassSimpleName)
                         .addModifiers(Modifier.PUBLIC)
                         .addMethod(constructor)
                         .addMethods(methods)
@@ -151,8 +223,6 @@ public class ResultProcessor extends AbstractProcessor {
                         .addType(resultBuilder.build())
                         .build();
 
-                String annotatedClassName = ac.getName().toString();
-                String packageName = annotatedClassName.substring(0, annotatedClassName.lastIndexOf("."));
                 JavaFile resultFile = JavaFile.builder(packageName, resultClass).build();
                 resultFile.writeTo(filer);
             }
@@ -160,7 +230,7 @@ public class ResultProcessor extends AbstractProcessor {
             messager.printMessage(Diagnostic.Kind.ERROR, e.getMessage());
         } catch (Exception e) {
             StringBuilder stackTrace = new StringBuilder();
-            for (StackTraceElement element: e.getStackTrace()){
+            for (StackTraceElement element : e.getStackTrace()) {
                 stackTrace.append(element.toString()).append("\n");
             }
             messager.printMessage(Diagnostic.Kind.ERROR, e.getMessage() + " \n" + stackTrace);
@@ -180,7 +250,7 @@ public class ResultProcessor extends AbstractProcessor {
         }
 
         Elements elements = processingEnv.getElementUtils();
-        TypeMirror type = arg.getElement().asType();
+        TypeMirror type = arg.getType();
         Types types = processingEnv.getTypeUtils();
         String[] arrayListTypes = new String[]{
                 String.class.getName(), Integer.class.getName(), CharSequence.class.getName()
@@ -194,6 +264,14 @@ public class ResultProcessor extends AbstractProcessor {
             }
         }
 
+        if (types.isAssignable(type, elements.getTypeElement(Serializable.class.getName()).asType())) {
+            return "Serializable";
+        }
+
+        if (types.isAssignable(type, elements.getTypeElement("android.os.Parcelable").asType())) {
+            return "Parcelable";
+        }
+
         if (types.isAssignable(type,
                 getWildcardType(ArrayList.class.getName(), "android.os.Parcelable"))) {
             return "ParcelableArrayList";
@@ -203,14 +281,6 @@ public class ResultProcessor extends AbstractProcessor {
 
         if (types.isAssignable(type, sparseParcelableArray)) {
             return "SparseParcelableArray";
-        }
-
-        if (types.isAssignable(type, elements.getTypeElement(Serializable.class.getName()).asType())) {
-            return "Serializable";
-        }
-
-        if (types.isAssignable(type, elements.getTypeElement("android.os.Parcelable").asType())) {
-            return "Parcelable";
         }
 
         return null;

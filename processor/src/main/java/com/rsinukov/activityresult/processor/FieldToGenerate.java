@@ -168,10 +168,6 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
         return typeString;
     }
 
-    public Element getElement() {
-        return element;
-    }
-
     public boolean isRequired() {
         return required;
     }
