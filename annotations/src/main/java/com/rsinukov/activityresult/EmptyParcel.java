@@ -7,7 +7,6 @@ import android.os.Bundle;
  */
 public class EmptyParcel implements CustomParcel<Object>
 {
-
     @Override
     public void put(String key, Object value, Bundle bundle)
     {
