@@ -2,10 +2,7 @@ package com.rsinukov.activityresult;
 
 import android.os.Bundle;
 
-/**
- * Created by rstk on 12/2/15.
- */
-public class EmptyParcel implements CustomParcel<Object>
+public class EmptyBundler implements CustomBundler<Object>
 {
     @Override
     public void put(String key, Object value, Bundle bundle)

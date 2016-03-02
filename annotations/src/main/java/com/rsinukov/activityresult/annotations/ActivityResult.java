@@ -1,15 +1,12 @@
 package com.rsinukov.activityresult.annotations;
 
-import com.rsinukov.activityresult.CustomParcel;
-import com.rsinukov.activityresult.EmptyParcel;
+import com.rsinukov.activityresult.CustomBundler;
+import com.rsinukov.activityresult.EmptyBundler;
 
-/**
- * Created by rstk on 12/8/15.
- */
 public @interface ActivityResult
 {
     String name();
     Class type();
     boolean isRequired() default true;
-    Class<? extends CustomParcel> parcel() default EmptyParcel.class;
+    Class<? extends CustomBundler> parcel() default EmptyBundler.class;
 }

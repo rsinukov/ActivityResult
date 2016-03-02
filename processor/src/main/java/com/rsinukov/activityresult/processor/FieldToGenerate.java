@@ -1,9 +1,8 @@
 package com.rsinukov.activityresult.processor;
 
-import com.rsinukov.activityresult.CustomParcel;
-import com.rsinukov.activityresult.EmptyParcel;
+import com.rsinukov.activityresult.CustomBundler;
+import com.rsinukov.activityresult.EmptyBundler;
 import com.rsinukov.activityresult.annotations.ActivityResult;
-import sun.net.ftp.FtpDirEntry;
 
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
@@ -15,108 +14,111 @@ import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
-import java.lang.reflect.Type;
 import java.util.List;
 
-/**
- * Created by rstk on 12/8/15.
- */
 public class FieldToGenerate implements Comparable<FieldToGenerate> {
 
     private final String name;
     private String typeString;
     private TypeMirror type;
-    private final boolean required;
-    private final TypeElement element;
-    private String bundlerClass;
+    private final boolean isRequired;
+    private String bundlerClassName;
+    private final TypeElement activityElement;
 
-    public FieldToGenerate(ActivityResult annotation, TypeElement element)
+    public FieldToGenerate(ActivityResult annotation, TypeElement activityElement)
             throws IllegalArgumentException {
         this.name = annotation.name();
-        this.required = annotation.isRequired();
-        this.element = element;
+        this.isRequired = annotation.isRequired();
+        this.activityElement = activityElement;
 
-        if (annotation.name() == null || annotation.name().length() == 0) { //TODO: change to isEmpty()
+        if (annotation.name() == null || annotation.name().length() == 0) { // TODO: change to Utils.isEmpty()
             throw new IllegalArgumentException(
-                    String.format("name() in @%s for class %s must me set to not empty value",
-                            ActivityResult.class.getSimpleName(), element.getQualifiedName().toString()));
+                    String.format(
+                            "name() in @%s for class %s must me set to not empty value",
+                            ActivityResult.class.getSimpleName(),
+                            activityElement.getQualifiedName().toString()
+                    )
+            );
         }
 
         try {
-            Class<? extends CustomParcel> clazz = annotation.parcel();
-            bundlerClass = getFullQualifiedParcelName(clazz);
+            Class<? extends CustomBundler> bundlerClass = annotation.parcel();
+            bundlerClassName = getFullQualifiedParcelName(bundlerClass);
         } catch (MirroredTypeException mte) {
-            TypeMirror baggerClass = mte.getTypeMirror();
-            bundlerClass = getFullQualifiedParcelName(baggerClass);
+            TypeMirror bundlerTypeMirror = mte.getTypeMirror();
+            bundlerClassName = getFullQualifiedParcelName(bundlerTypeMirror, activityElement);
         }
         try {
-            Class clazz = annotation.type();
-            typeString = getFullQualifiedParcelName(clazz);
+            Class fieldTypeClazz = annotation.type();
+            typeString = fieldTypeClazz.getCanonicalName();
         } catch (MirroredTypeException mte) {
-            TypeMirror baggerClass = mte.getTypeMirror();
-            typeString = getFullQualifiedParcelName(baggerClass);
+            TypeMirror fieldTypeMirror = mte.getTypeMirror();
+            typeString = fieldTypeMirror.toString();
             type = mte.getTypeMirror();
         }
     }
 
-    private String getFullQualifiedParcelName(TypeMirror baggerClass)
+    private String getFullQualifiedParcelName(TypeMirror bundlerClass, TypeElement activityElement)
             throws IllegalArgumentException {
-        if (baggerClass == null) {
-            throw new IllegalArgumentException(String.format("Could not get the CustomParcel class from @%s in @%s", name, element));
+        if (bundlerClass == null) {
+            throw new IllegalArgumentException(
+                    String.format("Could not get the CustomBundler class from @%s in @%s", name, activityElement)
+            );
         }
 
-        if (baggerClass.toString().equals(EmptyParcel.class.getCanonicalName())) {
-            return EmptyParcel.class.getCanonicalName();
+        if (bundlerClass.toString().equals(EmptyBundler.class.getCanonicalName())) {
+            return EmptyBundler.class.getCanonicalName();
         }
 
-//        if (baggerClass.getKind() != TypeKind.DECLARED) {
-//            throw new IllegalArgumentException(String.format("@%s is not a class in @%s ",
-//                    baggerClass.toString(), element.getSimpleName()));
-//        }
+        if (bundlerClass.getKind() != TypeKind.DECLARED) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "@%s is not a class in @%s ",
+                            bundlerClass.toString(),
+                            activityElement.getSimpleName()
+                    )
+            );
+        }
 
-//        if (!isPublicClass((DeclaredType) baggerClass)) {
-//            throw new IllegalArgumentException(String.format(
-//                    "The %s must be a public class to be a valid CustomParcel", baggerClass.toString()));
-//        }
+        if (!isPublicClass((DeclaredType) bundlerClass)) {
+            throw new IllegalArgumentException(
+                    String.format("The %s must be a public class to be a valid CustomBundler", bundlerClass.toString())
+            );
+        }
 
-//        if (!hasPublicEmptyConstructor((DeclaredType) baggerClass)) {
-//            throw new IllegalArgumentException(String.format(
-//                    "The %s must provide a public empty default constructor to be a valid CustomParcel",
-//                    baggerClass.toString()));
-//        }
+        if (!hasPublicEmptyConstructor((DeclaredType) bundlerClass)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The %s must provide a public empty default constructor to be a valid CustomBundler",
+                            bundlerClass.toString()
+                    )
+            );
+        }
 
-        return baggerClass.toString();
+        return bundlerClass.toString();
     }
 
-    private String getFullQualifiedParcelName(Class<? extends CustomParcel> clazz)
-            throws IllegalArgumentException {
-        if (clazz.equals(EmptyParcel.class)) {
-            return EmptyParcel.class.getCanonicalName();
+    private String getFullQualifiedParcelName(Class<? extends CustomBundler> clazz) throws IllegalArgumentException {
+        if (clazz.equals(EmptyBundler.class)) {
+            return EmptyBundler.class.getCanonicalName();
         }
 
         if (!Modifier.isPublic(clazz.getModifiers())) {
-            throw new IllegalArgumentException(String.format(
-                    "The %s must be a public class to be a valid CustomParcel",
-                    clazz.getCanonicalName()));
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The %s must be a public class to be a valid CustomBundler",
+                            clazz.getCanonicalName()
+                    )
+            );
         }
 
-        Constructor<?>[] constructors = clazz.getConstructors();
-
-        boolean foundDefaultConstructor = false;
-        for (Constructor c : constructors) {
-            boolean isPublicConstructor = Modifier.isPublic(c.getModifiers());
-            Class<?>[] pType = c.getParameterTypes();
-
-            if (pType.length == 0 && isPublicConstructor) {
-                foundDefaultConstructor = true;
-                break;
-            }
-        }
-
-        if (!foundDefaultConstructor) {
-            throw new IllegalArgumentException(String.format(
-                    "The %s must provide a public empty default constructor to be a valid CustomParcel",
-                    clazz.getCanonicalName()));
+        if (!hasPublicEmptyConstructor(clazz)) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The %s must provide a public empty default constructor to be a valid CustomBundler",
+                            clazz.getCanonicalName()
+                    )
+            );
         }
 
         return clazz.getCanonicalName();
@@ -146,30 +148,40 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
         return false;
     }
 
+    private boolean hasPublicEmptyConstructor(Class<? extends CustomBundler> clazz) {
+        Constructor<?>[] constructors = clazz.getConstructors();
+
+        for (Constructor c : constructors) {
+            boolean isPublicConstructor = Modifier.isPublic(c.getModifiers());
+            Class<?>[] pType = c.getParameterTypes();
+
+            if (pType.length == 0 && isPublicConstructor) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
-     * Get the full qualified name of the CustomParcel class.
+     * Get the full qualified name of the CustomBundler class.
      *
      * @return null if no custom parcel has been set. Otherwise the fully qualified name of the
      * custom parcel class.
      */
-    public String getBundlerClass() {
-        return bundlerClass.equals(EmptyParcel.class.getCanonicalName()) ? null : bundlerClass;
+    public String getBundlerClassName() {
+        return bundlerClassName.equals(EmptyBundler.class.getCanonicalName()) ? null : bundlerClassName;
     }
 
     public boolean hasCustomBundler() {
-        return getBundlerClass() != null;
+        return getBundlerClassName() != null;
     }
 
     public String getName() {
         return name;
     }
 
-    public String getTypeString() {
-        return typeString;
-    }
-
     public boolean isRequired() {
-        return required;
+        return isRequired;
     }
 
     public TypeMirror getType() {
@@ -207,8 +219,8 @@ public class FieldToGenerate implements Comparable<FieldToGenerate> {
         return typeString.endsWith("[]");
     }
 
-    public boolean isPrimitive() {
-        return element.asType().getKind().isPrimitive();
+    public TypeElement getActivityElement() {
+        return activityElement;
     }
 
     @Override

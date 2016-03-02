@@ -2,10 +2,7 @@ package com.rsinukov.activityresult;
 
 import android.os.Bundle;
 
-/**
- * Created by rstk on 12/2/15.
- */
-public interface CustomParcel<T> {
+public interface CustomBundler<T> {
 
     void put(String key, T value, Bundle bundle);
 

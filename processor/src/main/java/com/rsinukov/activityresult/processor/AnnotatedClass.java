@@ -3,66 +3,73 @@ package com.rsinukov.activityresult.processor;
 import com.rsinukov.activityresult.annotations.ActivityResult;
 import com.rsinukov.activityresult.annotations.ActivityResults;
 
-import javax.lang.model.element.Element;
 import javax.lang.model.element.Name;
 import javax.lang.model.element.TypeElement;
 import java.util.*;
 
-/**
- * Created by rstk on 12/8/15.
- */
 public class AnnotatedClass {
 
     private final Name name;
     private final Set<FieldToGenerate> optionalFields = new HashSet<FieldToGenerate>();
     private final Set<FieldToGenerate> requiredFields = new HashSet<FieldToGenerate>();
-    private final Element element;
-    private final Name className;
+    private final Name simpleName;
 
-    public AnnotatedClass(TypeElement element)
+    public AnnotatedClass(TypeElement activityElement)
             throws IllegalStateException {
 
-        this.name = element.getQualifiedName();
-        this.className = element.getSimpleName();
-        this.element = element;
+        this.name = activityElement.getQualifiedName();
+        this.simpleName = activityElement.getSimpleName();
 
-        ActivityResult annotation = element.getAnnotation(ActivityResult.class);
-        ActivityResults annotationsArray = element.getAnnotation(ActivityResults.class);
+        ActivityResult annotation = activityElement.getAnnotation(ActivityResult.class);
+        ActivityResults annotationsArray = activityElement.getAnnotation(ActivityResults.class);
 
         if (annotation != null && annotationsArray != null) {
             throw new IllegalArgumentException(
-                    String.format("Only one annotation is allowed. Error inin @%s",
-                           element.getQualifiedName().toString()));
+                    String.format(
+                            "Only one annotation is allowed. Error in @%s",
+                            activityElement.getQualifiedName().toString()
+                    )
+            );
         }
 
         if (annotation != null) {
-            addField(element, annotation);
+            addField(activityElement, annotation);
         }
         if (annotationsArray != null) {
             for (ActivityResult ar : annotationsArray.value()) {
-                addField(element, ar);
+                addField(activityElement, ar);
             }
         }
     }
 
-    private void addField(TypeElement element, ActivityResult annotation)
-            throws IllegalStateException {
-        boolean isMustFail = false;
+    private void addField(TypeElement element, ActivityResult annotation) throws IllegalStateException {
+        boolean mustFailOnDublicate = false;
 
         FieldToGenerate field = new FieldToGenerate(annotation, element);
         if (field.isRequired()) {
-            if (requiredFields.contains(field)) isMustFail = true;
+            if (isAlreadyExists(field)) {
+                mustFailOnDublicate = true;
+            }
             requiredFields.add(field);
         } else {
-            if (optionalFields.contains(field)) isMustFail = true;
+            if (isAlreadyExists(field)) {
+                mustFailOnDublicate = true;
+            }
             optionalFields.add(field);
         }
 
-        if (isMustFail) {
+        if (mustFailOnDublicate) {
             throw new IllegalArgumentException(
-                    String.format("dublicate name @%s in @%s",
-                            field.getName(), element.getQualifiedName().toString()));
+                    String.format(
+                            "Dublicate name @%s in @%s",
+                            field.getName(), element.getQualifiedName().toString()
+                    )
+            );
         }
+    }
+
+    private boolean isAlreadyExists(FieldToGenerate field) {
+        return requiredFields.contains(field) || optionalFields.contains(field);
     }
 
     public Set<FieldToGenerate> getOptionalFields() {
@@ -77,11 +84,7 @@ public class AnnotatedClass {
         return name;
     }
 
-    public Element getElement() {
-        return element;
-    }
-
-    public Name getClassName() {
-        return className;
+    public Name getSimpleName() {
+        return simpleName;
     }
 }

@@ -13,17 +13,10 @@ import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.Diagnostic;
-import javax.tools.JavaFileObject;
-import javax.xml.stream.events.StartElement;
 
-import java.io.IOException;
 import java.io.Serializable;
-import java.lang.reflect.Type;
 import java.util.*;
 
-/**
- * Created by rstk on 11/20/15.
- */
 public class ResultProcessor extends AbstractProcessor {
     private static final Map<String, String> ARGUMENT_TYPES = new HashMap<String, String>(20);
 
@@ -50,9 +43,6 @@ public class ResultProcessor extends AbstractProcessor {
         ARGUMENT_TYPES.put("android.os.Parcelable", "Parcelable");
     }
 
-    private Types typeUtils;
-    private Elements elementUtils;
-    private Filer filer;
     private Messager messager;
 
     @Override
@@ -71,151 +61,64 @@ public class ResultProcessor extends AbstractProcessor {
     @Override
     public synchronized void init(ProcessingEnvironment processingEnv) {
         super.init(processingEnv);
-        typeUtils = processingEnv.getTypeUtils();
-        elementUtils = processingEnv.getElementUtils();
-        filer = processingEnv.getFiler();
         messager = processingEnv.getMessager();
     }
 
-    //TODO: change to smaller methods
     @Override
     public boolean process(Set<? extends TypeElement> annotations, RoundEnvironment roundEnv) {
         Elements elementUtils = processingEnv.getElementUtils();
-        Types typeUtils = processingEnv.getTypeUtils();
         Filer filer = processingEnv.getFiler();
 
         try {
             List<AnnotatedClass> annotatedClasses = new ArrayList<AnnotatedClass>();
 
             for (Element element : roundEnv.getElementsAnnotatedWith(ActivityResult.class)) {
-                TypeElement enclosingElement = (TypeElement) element;
-                annotatedClasses.add(new AnnotatedClass(enclosingElement));
+                TypeElement activityElement = (TypeElement) element;
+                annotatedClasses.add(new AnnotatedClass(activityElement));
             }
             for (Element element : roundEnv.getElementsAnnotatedWith(ActivityResults.class)) {
-                TypeElement enclosingElement = (TypeElement) element;
-                annotatedClasses.add(new AnnotatedClass(enclosingElement));
+                TypeElement activityElement = (TypeElement) element;
+                annotatedClasses.add(new AnnotatedClass(activityElement));
             }
 
             for (AnnotatedClass annotatedClass : annotatedClasses) {
                 String annotatedClassName = annotatedClass.getName().toString();
                 String packageName = annotatedClassName.substring(0, annotatedClassName.lastIndexOf("."));
-                String resultClassSimpleName = annotatedClass.getClassName() + "Result";
+                String resultClassSimpleName = annotatedClass.getSimpleName() + "Result";
                 ClassName resultClassName = ClassName.get(packageName, resultClassSimpleName);
 
                 List<MethodSpec> methods = new ArrayList<MethodSpec>();
                 List<FieldSpec> fields = new ArrayList<FieldSpec>();
 
-                //create empty constructor for result class
-                MethodSpec constructor = MethodSpec.constructorBuilder()
-                        .addModifiers(Modifier.PRIVATE)
-                        .build();
+                List<FieldToGenerate> allFields = createResultClassFields(annotatedClass);
 
-                List<FieldToGenerate> allFields = new ArrayList<FieldToGenerate>(annotatedClass.getOptionalFields());
-                allFields.addAll(annotatedClass.getRequiredFields());
+                MethodSpec constructor = createResultClassConstructor();
 
-                //create with(Intent intent) method for result class
-                //TODO: add custom parcel functionality
                 TypeMirror intentType = elementUtils.getTypeElement("android.content.Intent").asType();
                 String intentSimpleClassName = "Intent";
                 TypeMirror bundleType = elementUtils.getTypeElement("android.os.Bundle").asType();
-                String bundleSimpleClassName = "Bundle";
-                MethodSpec.Builder withMethod = MethodSpec.methodBuilder("with")
-                        .returns(resultClassName)
-                        .addModifiers(Modifier.PUBLIC)
-                        .addModifiers(Modifier.STATIC)
-                        .addParameter(TypeName.get(intentType), "intent")
-                        .addStatement("$L bundle = intent.getExtras()", bundleType)
-                        .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
-                for (FieldToGenerate field : allFields) {
-                    String operation = getOperation(field);
-                    if (operation == null) {
-                        messager.printMessage(Diagnostic.Kind.ERROR,
-                                String.format("Can not get @%s from bundle in @%s", field.getName(), annotatedClass.getName()));
-                    }
-                    if (operation.equals("Serializable")) {
-                        withMethod.addStatement("result.$L = ($L) bundle.get$L(\"$L\")", field.getName(), field.getRawType(), operation, field.getName());
-                    } else {
-                        withMethod.addStatement("result.$L = bundle.get$L(\"$L\")", field.getName(), operation, field.getName());
-                    }
-                }
-                withMethod.addStatement("return result");
-                methods.add(withMethod.build());
 
-                //create fields and getters for result class
-                for (FieldToGenerate field : allFields) {
-                    MethodSpec methodSpec = MethodSpec
-                            .methodBuilder("get" + toCamelCase(field.getName()))
-                            .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
-                            .returns(TypeName.get(field.getType()))
-                            .addStatement("return $L", field.getName())
-                            .build();
-                    methods.add(methodSpec);
+                createResultClassToIntent(
+                        annotatedClass,
+                        resultClassSimpleName,
+                        resultClassName,
+                        methods,
+                        allFields,
+                        intentType,
+                        bundleType
+                );
+                createResultClassGetters(methods, fields, allFields);
+                createResultClassToIntent(
+                        annotatedClass,
+                        methods,
+                        allFields,
+                        intentType,
+                        intentSimpleClassName,
+                        bundleType
+                );
 
-                    FieldSpec fieldSpec = FieldSpec
-                            .builder(TypeName.get(field.getType()), field.getName(), Modifier.PRIVATE)
-                            .build();
-                    fields.add(fieldSpec);
-                }
-
-                //create toIntent method for result class
-                //TODO: add custom parcel functionality
-                MethodSpec.Builder toIntentMethod = MethodSpec.methodBuilder("toIntent")
-                        .returns(TypeName.get(intentType))
-                        .addModifiers(Modifier.PUBLIC)
-                        .addStatement("$L bundle = new $L()", bundleType, bundleType);
-                for (FieldToGenerate field : allFields) {
-                    String operation = getOperation(field);
-                    if (operation == null) {
-                        messager.printMessage(Diagnostic.Kind.ERROR,
-                                String.format("Can not put @%s to bundle in @%s", field.getName(), annotatedClass.getName()));
-                    }
-                    toIntentMethod.addStatement("bundle.put$L(\"$L\", $L)", operation, field.getName(), field.getName());
-                }
-                toIntentMethod.addStatement("$L intent = new $L()", intentSimpleClassName, intentSimpleClassName);
-                toIntentMethod.addStatement("intent.putExtras(bundle)");
-                toIntentMethod.addStatement("return intent");
-                methods.add(toIntentMethod.build());
-
-                //create builder for result class
-                TypeSpec.Builder resultBuilder = TypeSpec.classBuilder("Builder")
-                        .addModifiers(Modifier.PUBLIC, Modifier.STATIC);
-
-                //create constructor with required fields as params for builder
-                MethodSpec.Builder builderConstructor = MethodSpec.constructorBuilder()
-                        .addModifiers(Modifier.PUBLIC);
-                for (FieldToGenerate field : annotatedClass.getRequiredFields()) {
-                    builderConstructor.addParameter(TypeName.get(field.getType()), field.getName());
-                    builderConstructor.addStatement("this.$L = $L", field.getName(), field.getName());
-                }
-                resultBuilder.addMethod(builderConstructor.build());
-
-                //create fields for builder
-                for (FieldToGenerate field : allFields) {
-                    resultBuilder.addField(TypeName.get(field.getType()), field.getName(), Modifier.PRIVATE);
-                }
-
-                //create setters for optional fields for builder
-                for (FieldToGenerate field : annotatedClass.getOptionalFields()) {
-                    resultBuilder.addMethod(MethodSpec.methodBuilder("set" + toCamelCase(field.getName()))
-                            .returns(ClassName.get(annotatedClass.getName().toString() + "Result", "Builder"))
-                            .addModifiers(Modifier.PUBLIC)
-                            .addParameter(TypeName.get(field.getType()), field.getName())
-                            .addStatement("this.$L = $L", field.getName(), field.getName())
-                            .addStatement("return this")
-                            .build());
-                }
-
-                //create build() method for builder
-                MethodSpec.Builder builderMethodSpec = MethodSpec.methodBuilder("build")
-                        .returns(resultClassName)
-                        .addModifiers(Modifier.PUBLIC)
-                        .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
-                for (FieldToGenerate field : allFields) {
-                    builderMethodSpec.addStatement("result.$L = $L", field.getName(), field.getName());
-                }
-                builderMethodSpec.addStatement("return result");
-
-                resultBuilder.addMethod(builderMethodSpec.build());
+                TypeSpec.Builder resultBuilder =
+                        createBuilderInnerClass(annotatedClass, resultClassSimpleName, resultClassName, allFields);
 
                 //create result class
                 TypeSpec resultClass = TypeSpec.classBuilder(resultClassSimpleName)
@@ -242,10 +145,192 @@ public class ResultProcessor extends AbstractProcessor {
         return true;
     }
 
-    protected String getOperation(FieldToGenerate arg) {
-        String op = ARGUMENT_TYPES.get(arg.getRawType());
+    private List<FieldToGenerate> createResultClassFields(AnnotatedClass annotatedClass) {
+        List<FieldToGenerate> allFields = new ArrayList<FieldToGenerate>(annotatedClass.getOptionalFields());
+        allFields.addAll(annotatedClass.getRequiredFields());
+        return allFields;
+    }
+
+    private MethodSpec createResultClassConstructor() {
+        return MethodSpec.constructorBuilder()
+                .addModifiers(Modifier.PRIVATE)
+                .build();
+    }
+
+    // TODO: add custom parcel functionality
+    private void createResultClassToIntent(
+            AnnotatedClass annotatedClass,
+            String resultClassSimpleName,
+            ClassName resultClassName,
+            List<MethodSpec> methods,
+            List<FieldToGenerate> allFields,
+            TypeMirror intentType,
+            TypeMirror bundleType
+    ) {
+        MethodSpec.Builder withMethod = MethodSpec.methodBuilder("with")
+                .returns(resultClassName)
+                .addModifiers(Modifier.PUBLIC)
+                .addModifiers(Modifier.STATIC)
+                .addParameter(TypeName.get(intentType), "intent")
+                .addStatement("$L bundle = intent.getExtras()", bundleType)
+                .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
+        for (FieldToGenerate field : allFields) {
+            String operation = getOperation(field);
+            if (operation == null) {
+                messager.printMessage(
+                        Diagnostic.Kind.ERROR,
+                        String.format("Can not get @%s from bundle in @%s", field.getName(), annotatedClass.getName())
+                );
+                return;
+            }
+
+            if (operation.equals("Serializable")) {
+                withMethod.addStatement(
+                        "result.$L = ($L) bundle.get$L(\"$L\")",
+                        field.getName(),
+                        field.getRawType(),
+                        operation,
+                        field.getName()
+                );
+            } else {
+                withMethod.addStatement(
+                        "result.$L = bundle.get$L(\"$L\")",
+                        field.getName(),
+                        operation,
+                        field.getName()
+                );
+            }
+        }
+        withMethod.addStatement("return result");
+        methods.add(withMethod.build());
+    }
+
+    // TODO: add custom parcel functionality
+    private void createResultClassToIntent(
+            AnnotatedClass annotatedClass,
+            List<MethodSpec> methods,
+            List<FieldToGenerate> allFields,
+            TypeMirror intentType,
+            String intentSimpleClassName,
+            TypeMirror bundleType
+    ) {
+        MethodSpec.Builder toIntentMethod = MethodSpec.methodBuilder("toIntent")
+                .returns(TypeName.get(intentType))
+                .addModifiers(Modifier.PUBLIC)
+                .addStatement("$L bundle = new $L()", bundleType, bundleType);
+        for (FieldToGenerate field : allFields) {
+            String operation = getOperation(field);
+            if (operation == null) {
+                messager.printMessage(
+                        Diagnostic.Kind.ERROR,
+                        String.format("Can not put @%s to bundle in @%s", field.getName(), annotatedClass.getName())
+                );
+                return;
+            }
+            toIntentMethod.addStatement("bundle.put$L(\"$L\", $L)", operation, field.getName(), field.getName());
+        }
+        toIntentMethod.addStatement("$L intent = new $L()", intentSimpleClassName, intentSimpleClassName);
+        toIntentMethod.addStatement("intent.putExtras(bundle)");
+        toIntentMethod.addStatement("return intent");
+        methods.add(toIntentMethod.build());
+    }
+
+    private void createResultClassGetters(
+            List<MethodSpec> methods,
+            List<FieldSpec> fields,
+            List<FieldToGenerate> allFields
+    ) {
+        for (FieldToGenerate field : allFields) {
+            MethodSpec methodSpec = MethodSpec
+                    .methodBuilder("get" + toCamelCase(field.getName()))
+                    .addModifiers(Modifier.PUBLIC, Modifier.FINAL)
+                    .returns(TypeName.get(field.getType()))
+                    .addStatement("return $L", field.getName())
+                    .build();
+            methods.add(methodSpec);
+
+            FieldSpec fieldSpec = FieldSpec
+                    .builder(TypeName.get(field.getType()), field.getName(), Modifier.PRIVATE)
+                    .build();
+            fields.add(fieldSpec);
+        }
+    }
+
+    private TypeSpec.Builder createBuilderInnerClass(
+            AnnotatedClass annotatedClass,
+            String resultClassSimpleName,
+            ClassName resultClassName,
+            List<FieldToGenerate> allFields
+    ) {
+        TypeSpec.Builder resultBuilder = TypeSpec.classBuilder("Builder")
+                .addModifiers(Modifier.PUBLIC, Modifier.STATIC);
+
+        createBuilderClassConstructor(annotatedClass, resultBuilder);
+        createBuilderClassFields(allFields, resultBuilder);
+        createBuilderClassOptionalSetters(annotatedClass, resultBuilder);
+        createBuilderClassBuild(resultClassSimpleName, resultClassName, allFields, resultBuilder);
+
+        return resultBuilder;
+    }
+
+    private void createBuilderClassConstructor(
+            AnnotatedClass annotatedClass,
+            TypeSpec.Builder resultBuilder
+    ) {
+        MethodSpec.Builder builderConstructor = MethodSpec.constructorBuilder()
+                .addModifiers(Modifier.PUBLIC);
+        for (FieldToGenerate field : annotatedClass.getRequiredFields()) {
+            builderConstructor.addParameter(TypeName.get(field.getType()), field.getName());
+            builderConstructor.addStatement("this.$L = $L", field.getName(), field.getName());
+        }
+        resultBuilder.addMethod(builderConstructor.build());
+    }
+
+    private void createBuilderClassFields(
+            List<FieldToGenerate> allFields,
+            TypeSpec.Builder resultBuilder
+    ) {
+        for (FieldToGenerate field : allFields) {
+            resultBuilder.addField(TypeName.get(field.getType()), field.getName(), Modifier.PRIVATE);
+        }
+    }
+
+    private void createBuilderClassOptionalSetters(
+            AnnotatedClass annotatedClass,
+            TypeSpec.Builder resultBuilder
+    ) {
+        for (FieldToGenerate field : annotatedClass.getOptionalFields()) {
+            resultBuilder.addMethod(MethodSpec.methodBuilder("set" + toCamelCase(field.getName()))
+                    .returns(ClassName.get(annotatedClass.getName().toString() + "Result", "Builder"))
+                    .addModifiers(Modifier.PUBLIC)
+                    .addParameter(TypeName.get(field.getType()), field.getName())
+                    .addStatement("this.$L = $L", field.getName(), field.getName())
+                    .addStatement("return this")
+                    .build());
+        }
+    }
+
+    private void createBuilderClassBuild(
+            String resultClassSimpleName,
+            ClassName resultClassName,
+            List<FieldToGenerate> allFields,
+            TypeSpec.Builder resultBuilder
+    ) {
+        MethodSpec.Builder builderMethodSpec = MethodSpec.methodBuilder("build")
+                .returns(resultClassName)
+                .addModifiers(Modifier.PUBLIC)
+                .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
+        for (FieldToGenerate field : allFields) {
+            builderMethodSpec.addStatement("result.$L = $L", field.getName(), field.getName());
+        }
+        builderMethodSpec.addStatement("return result");
+        resultBuilder.addMethod(builderMethodSpec.build());
+    }
+
+    protected String getOperation(FieldToGenerate fieldToGenerate) {
+        String op = ARGUMENT_TYPES.get(fieldToGenerate.getRawType());
         if (op != null) {
-            if (arg.isArray()) {
+            if (fieldToGenerate.isArray()) {
                 return op + "Array";
             } else {
                 return op;
@@ -253,7 +338,7 @@ public class ResultProcessor extends AbstractProcessor {
         }
 
         Elements elements = processingEnv.getElementUtils();
-        TypeMirror type = arg.getType();
+        TypeMirror type = fieldToGenerate.getType();
         Types types = processingEnv.getTypeUtils();
         String[] arrayListTypes = new String[]{
                 String.class.getName(), Integer.class.getName(), CharSequence.class.getName()
@@ -267,21 +352,29 @@ public class ResultProcessor extends AbstractProcessor {
             }
         }
 
-        if (types.isAssignable(type, elements.getTypeElement(Serializable.class.getName()).asType())) {
-            return "Serializable";
-        }
-
         if (types.isAssignable(type, elements.getTypeElement("android.os.Parcelable").asType())) {
             return "Parcelable";
+        }
+
+        if (types.isAssignable(type, elements.getTypeElement(Serializable.class.getName()).asType())) {
+            messager.printMessage(
+                    Diagnostic.Kind.WARNING,
+                    String.format(
+                            "It's better not to use Serializable. Consider @%s implement Parcelable in @%s",
+                            fieldToGenerate.getName(),
+                            fieldToGenerate.getActivityElement().getQualifiedName()
+                    )
+            );
+            return "Serializable";
         }
 
         if (types.isAssignable(type,
                 getWildcardType(ArrayList.class.getName(), "android.os.Parcelable"))) {
             return "ParcelableArrayList";
         }
+
         TypeMirror sparseParcelableArray =
                 getWildcardType("android.util.SparseArray", "android.os.Parcelable");
-
         if (types.isAssignable(type, sparseParcelableArray)) {
             return "SparseParcelableArray";
         }
@@ -306,6 +399,5 @@ public class ResultProcessor extends AbstractProcessor {
         StringBuilder sb = new StringBuilder(string);
         sb.replace(0, 1, string.substring(0, 1).toUpperCase());
         return sb.toString();
-
     }
 }
