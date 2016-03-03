@@ -98,7 +98,7 @@ public class ResultProcessor extends AbstractProcessor {
                 String intentSimpleClassName = "Intent";
                 TypeMirror bundleType = elementUtils.getTypeElement("android.os.Bundle").asType();
 
-                createResultClassToIntent(
+                createResultClassWithIntent(
                         annotatedClass,
                         resultClassSimpleName,
                         resultClassName,
@@ -158,7 +158,7 @@ public class ResultProcessor extends AbstractProcessor {
     }
 
     // TODO: add custom parcel functionality
-    private void createResultClassToIntent(
+    private void createResultClassWithIntent(
             AnnotatedClass annotatedClass,
             String resultClassSimpleName,
             ClassName resultClassName,
@@ -175,13 +175,31 @@ public class ResultProcessor extends AbstractProcessor {
                 .addStatement("$L bundle = intent.getExtras()", bundleType)
                 .addStatement("$L result = new $L()", resultClassSimpleName, resultClassSimpleName);
         for (FieldToGenerate field : allFields) {
+
+            if (field.hasCustomBundler()) {
+                String bundlerVariableName = field.getName() + "Bundler";
+                withMethod.addStatement(
+                        "$L $L = new $L()",
+                        field.getBundlerClassName(),
+                        bundlerVariableName,
+                        field.getBundlerClassName()
+                );
+                withMethod.addStatement(
+                        "result.$L = $L.get(\"$L\", bundle)",
+                        field.getName(),
+                        bundlerVariableName,
+                        field.getName()
+                );
+                continue;
+            }
+
             String operation = getOperation(field);
             if (operation == null) {
                 messager.printMessage(
                         Diagnostic.Kind.ERROR,
                         String.format("Can not get @%s from bundle in @%s", field.getName(), annotatedClass.getName())
                 );
-                return;
+                // TODO: throw exception
             }
 
             if (operation.equals("Serializable")) {
@@ -218,14 +236,32 @@ public class ResultProcessor extends AbstractProcessor {
                 .returns(TypeName.get(intentType))
                 .addModifiers(Modifier.PUBLIC)
                 .addStatement("$L bundle = new $L()", bundleType, bundleType);
+
         for (FieldToGenerate field : allFields) {
+            if (field.hasCustomBundler()) {
+                String bundlerVariableName = field.getName() + "Bundler";
+                toIntentMethod.addStatement(
+                        "$L $L = new $L()",
+                        field.getBundlerClassName(),
+                        bundlerVariableName,
+                        field.getBundlerClassName()
+                );
+                toIntentMethod.addStatement(
+                        "$L.put(\"$L\", $L, bundle)",
+                        bundlerVariableName,
+                        field.getName(),
+                        field.getName()
+                );
+                continue;
+            }
+
             String operation = getOperation(field);
             if (operation == null) {
                 messager.printMessage(
                         Diagnostic.Kind.ERROR,
                         String.format("Can not put @%s to bundle in @%s", field.getName(), annotatedClass.getName())
                 );
-                return;
+                // TODO: throw exception
             }
             toIntentMethod.addStatement("bundle.put$L(\"$L\", $L)", operation, field.getName(), field.getName());
         }
